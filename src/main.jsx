@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BarChart3, CalendarDays, CarFront, ChevronRight, CircleDollarSign, Droplets, Fuel,
-  Gauge, History, LayoutDashboard, Menu, Pencil, Plus, Printer, ReceiptText, Save,
-  Search, Settings2, Trash2, TrendingUp, X,
+  Download, Gauge, History, LayoutDashboard, Menu, Pencil, Plus, ReceiptText, Save,
+  Search, Settings2, Share2, Trash2, TrendingUp, X,
 } from "lucide-react";
 import {
   calculateSummary, createId, filterByMonth, formatCurrency, formatDate, formatMonth,
@@ -19,6 +19,87 @@ const navItems = [
   ["statistics", "Statistik", BarChart3],
   ["vehicles", "Fahrzeuge", CarFront],
 ];
+
+let pdfModulesPromise;
+function loadPdfModules() {
+  pdfModulesPromise ??= Promise.all([import("jspdf"), import("jspdf-autotable")]);
+  return pdfModulesPromise;
+}
+
+async function buildInvoicePdf({ month, selectedCar, entries, summary, vehicles }) {
+  const [{ jsPDF }, { default: autoTable }] = await loadPdfModules();
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const vehicleName = selectedCar?.name ?? "Alle Fahrzeuge";
+  const fileVehicle = vehicleName.replace(/[^a-zA-Z0-9äöüÄÖÜß-]+/g, "-").replace(/^-|-$/g, "");
+  const filename = `Fuelio-Abrechnung-${month}-${fileVehicle || "Fahrzeuge"}.pdf`;
+
+  doc.setFillColor(13, 37, 32);
+  doc.rect(0, 0, pageWidth, 42, "F");
+  doc.setTextColor(105, 231, 211);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.text("FUELIO", 16, 18);
+  doc.setTextColor(235, 244, 241);
+  doc.setFontSize(11);
+  doc.text("MONATSABRECHNUNG", 16, 29);
+  doc.setFontSize(18);
+  doc.text(formatMonth(month), pageWidth - 16, 18, { align: "right" });
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(selectedCar ? `${selectedCar.name} · ${selectedCar.licensePlate} · ${selectedCar.type}` : "Alle Fahrzeuge", pageWidth - 16, 29, { align: "right" });
+
+  const kpis = [
+    ["GESAMTKOSTEN", formatCurrency(summary.costs)],
+    ["GETANKTE LITER", `${formatNumber(summary.liters)} l`],
+    ["Ø PREIS / LITER", `${formatNumber(summary.averagePrice, 3)} €`],
+    ["TANKVORGÄNGE", String(summary.count)],
+  ];
+  const boxWidth = (pageWidth - 32 - 9) / 4;
+  kpis.forEach(([label, value], index) => {
+    const x = 16 + index * (boxWidth + 3);
+    doc.setFillColor(240, 245, 243);
+    doc.roundedRect(x, 49, boxWidth, 23, 2, 2, "F");
+    doc.setTextColor(102, 116, 112);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.text(label, x + 4, 57);
+    doc.setTextColor(23, 32, 31);
+    doc.setFontSize(12);
+    doc.text(value, x + 4, 66);
+  });
+
+  const includeVehicle = !selectedCar;
+  const head = [["Datum", ...(includeVehicle ? ["Fahrzeug"] : []), "Kilometerstand", "Liter", "Preis/Liter", "Gesamtbetrag"]];
+  const body = entries.map((entry) => [
+    formatDate(entry.date),
+    ...(includeVehicle ? [vehicles.find((car) => car.id === entry.vehicleId)?.name ?? "–"] : []),
+    `${formatNumber(entry.mileage, 0)} km`,
+    `${formatNumber(entry.liters)} l`,
+    `${formatNumber(entry.pricePerLiter, 3)} €`,
+    formatCurrency(entry.totalPrice),
+  ]);
+
+  autoTable(doc, {
+    startY: 80,
+    head,
+    body: body.length ? body : [["Keine Tankvorgänge in diesem Zeitraum.", ...Array(head[0].length - 1).fill("")]],
+    foot: [["Gesamtsumme", ...Array(head[0].length - 2).fill(""), formatCurrency(summary.costs)]],
+    theme: "plain",
+    styles: { font: "helvetica", fontSize: 9, cellPadding: 4, textColor: [35, 45, 43], lineColor: [222, 229, 226], lineWidth: { bottom: 0.2 } },
+    headStyles: { fillColor: [225, 235, 232], textColor: [63, 83, 78], fontStyle: "bold" },
+    footStyles: { fillColor: [240, 245, 243], textColor: [13, 37, 32], fontStyle: "bold" },
+    columnStyles: { [head[0].length - 1]: { halign: "right", fontStyle: "bold" } },
+    didDrawPage: () => {
+      doc.setTextColor(130, 143, 139);
+      doc.setFontSize(7);
+      doc.text(`Erstellt mit Fuelio · ${new Intl.DateTimeFormat("de-DE").format(new Date())}`, 16, doc.internal.pageSize.getHeight() - 8);
+      doc.text(`Seite ${doc.getNumberOfPages()}`, pageWidth - 16, doc.internal.pageSize.getHeight() - 8, { align: "right" });
+    },
+  });
+
+  return { doc, filename };
+}
 
 function App() {
   const [data, setData] = useState(loadStoredData);
@@ -203,9 +284,34 @@ function BillingView({ data }) {
   const [month, setMonth] = useState(currentMonth);
   const [vehicle, setVehicle] = useState(data.vehicles[0]?.id ?? "all");
   const [created, setCreated] = useState(false);
+  const [pdfStatus, setPdfStatus] = useState("");
   const entries = filterByMonth(data.refuels, month, vehicle);
   const summary = calculateSummary(entries);
   const selectedCar = data.vehicles.find((car) => car.id === vehicle);
+  useEffect(() => { loadPdfModules(); }, []);
+  const createPdf = () => buildInvoicePdf({ month, selectedCar, entries, summary, vehicles: data.vehicles });
+  const downloadPdf = async () => {
+    setPdfStatus("PDF wird erstellt …");
+    const { doc, filename } = await createPdf();
+    doc.save(filename);
+    setPdfStatus("PDF wurde erstellt.");
+  };
+  const sharePdf = async () => {
+    setPdfStatus("PDF wird für das Teilen vorbereitet …");
+    const { doc, filename } = await createPdf();
+    const file = new File([doc.output("blob")], filename, { type: "application/pdf" });
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ title: `Fuelio Monatsabrechnung ${formatMonth(month)}`, text: `Tankabrechnung für ${selectedCar?.name ?? "alle Fahrzeuge"}`, files: [file] });
+        setPdfStatus("Abrechnung wurde geteilt.");
+      } catch (error) {
+        if (error?.name !== "AbortError") setPdfStatus("Teilen war nicht möglich. Bitte erneut versuchen.");
+      }
+      return;
+    }
+    doc.save(filename);
+    setPdfStatus("Direktes Teilen wird hier nicht unterstützt. Die PDF wurde heruntergeladen und kann anschließend geteilt werden.");
+  };
 
   return <section className="content-stack page-enter">
     <div className="billing-controls no-print">
@@ -215,9 +321,10 @@ function BillingView({ data }) {
       <button className="primary-action" onClick={() => setCreated(true)}><ReceiptText size={19} />Monatsabrechnung erstellen</button>
     </div>
 
-    {!created ? <div className="panel preview-placeholder"><span className="document-shape"><ReceiptText /></span><h2>Deine Abrechnung ist einen Klick entfernt</h2><p>Wähle Monat und Fahrzeug aus. Anschließend kannst du den Bericht direkt drucken oder über den Browser als PDF speichern.</p></div>
+    {!created ? <div className="panel preview-placeholder"><span className="document-shape"><ReceiptText /></span><h2>Deine Abrechnung ist einen Klick entfernt</h2><p>Wähle Monat und Fahrzeug aus. Anschließend kannst du eine echte PDF erstellen, speichern oder direkt über dein Smartphone teilen.</p></div>
     : <article className="print-sheet">
-      <div className="report-header"><div><span className="brand report-brand"><span className="brand-mark"><Fuel size={19} /></span>Fuelio</span><p>Monatsabrechnung</p></div><button className="secondary-action no-print" onClick={() => window.print()}><Printer size={18} />Drucken / PDF</button></div>
+      <div className="report-header"><div><span className="brand report-brand"><span className="brand-mark"><Fuel size={19} /></span>Fuelio</span><p>Monatsabrechnung</p></div><div className="report-actions no-print"><button className="secondary-action" onClick={downloadPdf}><Download size={18} />PDF speichern</button><button className="share-action" onClick={sharePdf}><Share2 size={18} />Abrechnung teilen</button></div></div>
+      {pdfStatus && <p className="action-note no-print" role="status">{pdfStatus}</p>}
       <div className="report-title"><div><p>Abrechnungszeitraum</p><h2>{formatMonth(month)}</h2></div><div><p>Fahrzeug</p><h3>{selectedCar?.name ?? "Alle Fahrzeuge"}</h3><span>{selectedCar ? `${selectedCar.licensePlate} · ${selectedCar.type}` : `${data.vehicles.length} Fahrzeuge`}</span></div></div>
       <div className="report-kpis"><div><span>Gesamtkosten</span><strong>{formatCurrency(summary.costs)}</strong></div><div><span>Getankte Liter</span><strong>{formatNumber(summary.liters)} l</strong></div><div><span>Ø Preis / Liter</span><strong>{formatNumber(summary.averagePrice, 3)} €</strong></div><div><span>Tankvorgänge</span><strong>{summary.count}</strong></div></div>
       <div className="table-wrap"><table><thead><tr><th>Datum</th>{vehicle === "all" && <th>Fahrzeug</th>}<th>km-Stand</th><th>Liter</th><th>Preis/Liter</th><th>Gesamt</th></tr></thead><tbody>{entries.map((entry) => <tr key={entry.id}><td>{formatDate(entry.date)}</td>{vehicle === "all" && <td>{data.vehicles.find((car) => car.id === entry.vehicleId)?.name ?? "–"}</td>}<td>{formatNumber(entry.mileage, 0)} km</td><td>{formatNumber(entry.liters)} l</td><td>{formatNumber(entry.pricePerLiter, 3)} €</td><td><strong>{formatCurrency(entry.totalPrice)}</strong></td></tr>)}{!entries.length && <tr><td colSpan={vehicle === "all" ? 6 : 5} className="empty-cell">Keine Tankvorgänge in diesem Zeitraum.</td></tr>}</tbody><tfoot><tr><td colSpan={vehicle === "all" ? 5 : 4}>Gesamtsumme</td><td>{formatCurrency(summary.costs)}</td></tr></tfoot></table></div>
