@@ -9,7 +9,8 @@ Fuelio ist eine mobile-first Web-App zur Verwaltung von Fahrzeugen, Tankvorgäng
 - Tankvorgänge hinzufügen, bearbeiten und löschen
 - Automatische Berechnung von Gesamtpreis und Preis pro Liter
 - Historie mit Filtern nach Monat, Jahr und Fahrzeug
-- Professionelle Monatsabrechnung für Druck oder PDF
+- Professionelle Monatsabrechnung als echte PDF-Datei
+- Direktes Teilen der PDF über das native Teilen-Menü unterstützter Smartphones
 - Monatsstatistiken für Kosten, Liter und Kraftstoffpreis
 - Dauerhafte, versionierte Speicherung im `localStorage`
 - Responsive Dark-Mode-Oberfläche für Smartphone und Desktop
@@ -91,3 +92,7 @@ So bleibt die Oberfläche unverändert; lediglich die Datenquelle wird ausgetaus
 ## Datenschutz
 
 Die aktuelle Version sendet keine Fahrzeug- oder Tankdaten an einen Server. Lediglich die Schriftart wird beim ersten Aufruf von Google Fonts geladen. Wer vollständig ohne externe Requests arbeiten möchte, kann die Schrift entfernen oder lokal mit ausliefern.
+
+### PDF und Teilen
+
+Die Abrechnung wird vollständig im Browser als PDF erzeugt. Auf Smartphones mit Unterstützung für die Web Share API öffnet **Abrechnung teilen** das native Teilen-Menü und übergibt die PDF als Datei – dort kann sie beispielsweise an eine Mail-App, einen Messenger oder AirDrop weitergereicht werden. Auf nicht unterstützten Browsern wird die PDF automatisch heruntergeladen. Ein vollautomatischer E-Mail-Versand mit Anhang benötigt einen abgesicherten Backend-Dienst und ist in der statischen GitHub-Pages-Version bewusst nicht enthalten.
