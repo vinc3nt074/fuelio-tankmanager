@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "jspdf": "latest",
+    "jspdf-autotable": "latest",
     "lucide-react": "latest",
     "vite": "latest",
     "react": "latest",
